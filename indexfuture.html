@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日本人口動態カートグラム可視化 (2020-2100) - 推定拡張版</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #2c2c2c;
+            --panel-bg: #888888;
+            --text-color: #303030;
+            --border-color: #e2e8f0;
+            --primary-color: #a0d9ff;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1100px;
+            background-color: var(--panel-bg);
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            padding: 24px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        header {
+            width: 100%;
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 16px;
+        }
+
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(237, 242, 247, 0.9);
+            padding: 12px 18px;
+            border-radius: 8px;
+            width: 280px;
+            box-sizing: border-box;
+            border: 1px solid var(--border-color);
+            z-index: 10;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .slider-wrapper {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .timeline-slider {
+            width: 100%;
+            margin: 0;
+            cursor: pointer;
+            accent-color: var(--primary-color);
+        }
+
+        .slider-labels {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #4a5568;
+            padding: 0 4px;
+            box-sizing: border-box;
+        }
+
+        .vis-wrapper {
+            position: relative;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        svg {
+            background-color: var(--panel-bg);
+        }
+
+        .prefecture-bg {
+            fill: #009800;
+            stroke: #cbd5e1;
+            stroke-width: 0.4px;
+            stroke-dasharray: 2, 2;
+        }
+
+        .prefecture {
+            stroke: #ffffff;
+            stroke-width: 0.5px;
+            transition: stroke 0.2s ease, stroke-width 0.2s ease;
+        }
+
+        .prefecture:hover {
+            stroke: #2c3e50;
+            stroke-width: 1.5px;
+        }
+
+        .tooltip {
+            position: absolute;
+            padding: 10px 14px;
+            font-size: 0.85rem;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            pointer-events: none;
+            opacity: 0;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            line-height: 1.5;
+            z-index: 10;
+            transition: opacity 0.15s ease;
+        }
+
+        .tooltip-title {
+            font-weight: bold;
+            font-size: 0.95rem;
+            margin-bottom: 4px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 2px;
+        }
+
+        .legend-container {
+            position: absolute;
+            bottom: 200px;
+            right: 30px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            font-size: 0.8rem;
+        }
+
+        .legend-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            text-align: center;
+        }
+
+        .legend-bar {
+            width: 150px;
+            height: 12px;
+            margin-bottom: 4px;
+        }
+
+        .legend-labels {
+            display: flex;
+            justify-content: space-between;
+            color: #7f8c8d;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2rem;
+            font-weight: 600;
+            z-index: 100;
+            transition: opacity 0.4s ease;
+        }
+
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div id="loading" class="loading-overlay">データ読込中・将来人口推定計算中...</div>
+
+        <header>
+            <h1>都道府県別日本人口動態カートグラム</h1>
+        </header>
+
+        <div class="vis-wrapper">
+            <div class="controls">
+                <div class="slider-wrapper">
+                    <input type="range" id="time-slider" min="0" max="4" value="0" step="1" class="timeline-slider">
+                    <div class="slider-labels">
+                        <span>2020年</span>
+                        <span>2035年</span>
+                        <span>2050年</span>
+                        <span style="color: #c0392b;">2070年*</span>
+                        <span style="color: #c0392b;">2100年*</span>
+                    </div>
+                </div>
+            </div>
+            <div id="map-canvas"></div>
+            <div id="tooltip" class="tooltip"></div>
+
+            <div class="legend-container">
+                <div class="legend-title">2020年比 人口指数</div>
+                <div class="legend-bar" id="legend-gradient"></div>
+                <div class="legend-labels">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const width = 800;
+        const height = 650;
+
+        // 時間軸インデックスマッピングの拡張
+        const yearMapping = ["2020", "2030", "2050", "2070", "2100"];
+
+        // 国土全体の趨勢・平均値の動的初期化用構造体
+        const averages = {
+            2020: 1.0,
+            2030: 0.889,
+            2050: 0.767,
+            2070: 0.0, // 後段で動的算出
+            2100: 0.0  // 後段で動的算出
+        };
+
+        /**
+         * 1. 推計レイヤー (PopulationEstimationEngine)
+         * Open/Closed Principleに基づく数理モデルカプセル化
+         */
+        const PopulationEstimationEngine = {
+            // 指数減衰モデルによる将来値の推定
+            estimate: function (pop2020, pop2050, targetYear) {
+                if (pop2020 <= 0 || pop2050 <= 0) return 0;
+
+                const t2050 = 30; // 2050年までの経過年数 (2050 - 2020)
+                const tTarget = targetYear - 2020;
+
+                // 減衰係数 b の算出
+                const b = -Math.log(pop2050 / pop2020) / t2050;
+
+                // 将来人口の算出
+                return pop2020 * Math.exp(-b * tTarget);
+            }
+        };
+
+        // 各年の平均値を基準とする動的なカラースケール
+        function getColorScaleForYear(year) {
+            const avg = averages[year] || 1.0;
+            if (year === "2020") {
+                return d3.scaleLinear()
+                    .domain([0.5, 0.75, 1.0, 1.1])
+                    .range(["#d73027", "#fdae61", "#ffffbf", "#4575b4"]);
+            }
+            return d3.scaleLinear()
+                .domain([0.3, (0.3 + avg) / 2, avg, (avg + 1.1) / 2, 1.1])
+                .range(["#313695", "#74add1", "#ffffbf", "#fdae61", "#d73027"]);
+        }
+
+        // 凡例用グラデーションの生成
+        const legendWidth = 150;
+        const legendSvg = d3.select("#legend-gradient")
+            .append("svg")
+            .attr("width", legendWidth)
+            .attr("height", 12);
+
+        const gradientId = "legend-color-gradient";
+        const defs = legendSvg.append("defs");
+        const linearGradient = defs.append("linearGradient")
+            .attr("id", gradientId)
+            .attr("x1", "0%").attr("y1", "0%")
+            .attr("x2", "100%").attr("y2", "0%");
+
+        legendSvg.append("rect")
+            .attr("width", legendWidth)
+            .attr("height", 12)
+            .style("fill", `url(#${gradientId})`);
+
+        function updateLegend(year) {
+            const currentScale = getColorScaleForYear(year);
+            linearGradient.selectAll("stop").remove();
+
+            const samples = 20;
+            for (let i = 0; i <= samples; i++) {
+                const t = i / samples;
+                const val = 0.3 + t * (1.1 - 0.3);
+                linearGradient.append("stop")
+                    .attr("offset", `${t * 100}%`)
+                    .attr("stop-color", currentScale(val));
+            }
+
+            const avgVal = averages[year];
+            const displayYear = year === "2030" ? "2035" : year;
+            d3.select(".legend-title").text(`2020年比 人口指数`);
+
+            d3.select(".legend-labels").html(`
+                <span>0.3</span>
+                <span style="font-weight: bold; color: #2c3e50;">${avgVal ? avgVal.toFixed(2) : "1.0"}</span>
+                <span>1.1</span>
+            `);
+        }
+
+        // メインマップ用SVGの設定
+        const svg = d3.select("#map-canvas")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        const projection = d3.geoMercator();
+        const pathGenerator = d3.geoPath().projection(projection);
+        const tooltip = d3.select("#tooltip");
+
+        function normalizePrefName(name) {
+            if (!name) return "";
+            return name.replace(/[都府県]$/, "").trim();
+        }
+
+        function parsePopulationValue(val) {
+            if (!val) return 0;
+            return parseFloat(val.replace(/,/g, '').replace(/\s/g, ''));
+        }
+
+        Promise.all([
+            d3.json("prefectures.geojson"),
+            d3.csv("japanpop.csv")
+        ]).then(([geojson, csvData]) => {
+
+            /**
+             * 2. データ管理・拡張レイヤー (DataManager)
+             */
+            const dataMap = new Map();
+            let totalPop2020 = 0;
+            let totalPop2070 = 0;
+            let totalPop2100 = 0;
+            let validPrefCount = 0;
+
+            // 既知データのパースおよび将来推計の結合
+            csvData.forEach(row => {
+                const rawName = row["地域"] || row["都道府県"] || "";
+                const normName = normalizePrefName(rawName);
+                if (!normName || rawName === "全国" || rawName.includes("減少県")) return;
+
+                const col2020 = Object.keys(row).find(k => k.includes("2020"));
+                const col2030 = Object.keys(row).find(k => k.includes("2030")); // 内部キー2030 (表示2035)
+                const col2050 = Object.keys(row).find(k => k.includes("2050"));
+
+                const pop2020 = parsePopulationValue(row[col2020]);
+                const pop2030 = parsePopulationValue(row[col2030]);
+                const pop2050 = parsePopulationValue(row[col2050]);
+
+                // EstimationEngine による動的外挿計算の実行
+                const pop2070 = PopulationEstimationEngine.estimate(pop2020, pop2050, 2070);
+                const pop2100 = PopulationEstimationEngine.estimate(pop2020, pop2050, 2100);
+
+                totalPop2020 += pop2020;
+                totalPop2070 += pop2070;
+                totalPop2100 += pop2100;
+                validPrefCount++;
+
+                dataMap.set(normName, {
+                    officialName: rawName,
+                    pops: {
+                        2020: pop2020,
+                        2030: pop30 = pop2030,
+                        2050: pop2050,
+                        2070: pop2070,
+                        2100: pop2100
+                    },
+                    scales: {
+                        2020: 1.0,
+                        2030: pop2020 ? (pop2030 / pop2020) : 1.0,
+                        2050: pop2020 ? (pop2050 / pop2020) : 1.0,
+                        2070: pop2020 ? (pop2070 / pop2020) : 1.0,
+                        2100: pop2020 ? (pop2100 / pop2020) : 1.0
+                    }
+                });
+            });
+
+            // マクロトレンド（全国平均指数）の動的更新
+            averages[2070] = totalPop2070 / totalPop2020;
+            averages[2100] = totalPop2100 / totalPop2020;
+
+            // GeoJSONへのプロパティインジェクション
+            geojson.features.forEach(feature => {
+                const props = feature.properties || {};
+                const geoName = props.name_ja || props.name || props.nam_ja || props.pref || props.PREFECTURE || "";
+                const normGeoName = normalizePrefName(geoName);
+
+                let match = dataMap.get(normGeoName);
+                if (!match) {
+                    for (let [key, val] of dataMap.entries()) {
+                        if (normGeoName.includes(key) || key.includes(normGeoName)) {
+                            match = val;
+                            break;
+                        }
+                    }
+                }
+
+                if (match) {
+                    feature.properties.meta = match;
+                } else {
+                    feature.properties.meta = {
+                        officialName: geoName,
+                        pops: { 2020: 0, 2030: 0, 2050: 0, 2070: 0, 2100: 0 },
+                        scales: { 2020: 1.0, 2030: 1.0, 2050: 1.0, 2070: 1.0, 2100: 1.0 }
+                    };
+                }
+            });
+
+            /**
+             * 3. 可視化・パイプラインレイヤー (CartogramRenderPipeline)
+             */
+            projection.fitSize([width, height], geojson);
+
+            // 背景静的ガイドレイヤー
+            svg.append("g")
+                .selectAll(".prefecture-bg")
+                .data(geojson.features)
+                .enter()
+                .append("path")
+                .attr("class", "prefecture-bg")
+                .attr("d", pathGenerator);
+
+            // カートグラム動的変形レイヤー
+            const prefGroup = svg.append("g");
+            const prefectures = prefGroup.selectAll(".prefecture")
+                .data(geojson.features)
+                .enter()
+                .append("path")
+                .attr("class", "prefecture")
+                .attr("d", pathGenerator)
+                .style("cursor", "pointer")
+                .on("mouseover", function (event, d) {
+                    d3.select(this).raise();
+                    tooltip.style("opacity", 1);
+                })
+                .on("mousemove", function (event, d) {
+                    const sliderIndex = d3.select("#time-slider").node().value;
+                    const activeYear = yearMapping[sliderIndex];
+                    const meta = d.properties.meta;
+
+                    const pop = meta.pops[activeYear];
+                    const scale = meta.scales[activeYear];
+                    const displayYear = activeYear === "2030" ? "2035" : activeYear;
+                    const isEstimated = parseInt(activeYear) > 2050 ? " (推定値)" : "";
+
+                    tooltip.html(`
+                        <div class="tooltip-title">${meta.officialName}${isEstimated}</div>
+                        人口: ${pop ? Math.round(pop).toLocaleString() : "-"} 千人<br/>
+                        指数 (${displayYear}年/2020年比): ${(scale * 100).toFixed(1)}%
+                    `);
+
+                    const [x, y] = d3.pointer(event, d3.select(".vis-wrapper").node());
+                    tooltip
+                        .style("left", (x + 15) + "px")
+                        .style("top", (y + 30) + "px");
+                })
+                .on("mouseout", function () {
+                    tooltip.style("opacity", 0);
+                });
+
+            function updateVisualization(year) {
+                const currentScale = getColorScaleForYear(year);
+
+                prefectures.transition()
+                    .duration(1000)
+                    .ease(d3.easeCubicInOut)
+                    .attr("transform", d => {
+                        const centroid = pathGenerator.centroid(d);
+                        if (!centroid || isNaN(centroid[0]) || isNaN(centroid[1])) return "";
+
+                        const cx = centroid[0];
+                        const cy = centroid[1];
+                        const s = d.properties.meta.scales[year] || 1.0;
+
+                        return `translate(${cx}, ${cy}) scale(${s}) translate(${-cx}, ${-cy})`;
+                    })
+                    .attr("fill", d => {
+                        const s = d.properties.meta.scales[year] || 1.0;
+                        return currentScale(s);
+                    });
+
+                updateLegend(year);
+            }
+
+            // スライダーイベントリスナーの割当
+            d3.select("#time-slider").on("input", function (event) {
+                const targetYear = yearMapping[event.target.value];
+                updateVisualization(targetYear);
+            });
+
+            // 初期レンダリング (2020年)
+            updateVisualization("2020");
+
+            // ローディングインジケータ削除
+            d3.select("#loading").classed("hidden", true);
+            setTimeout(() => d3.select("#loading").remove(), 400);
+
+        }).catch(error => {
+            console.error("データ処理パイプライン実行中に例外が発生:", error);
+            d3.select("#loading").text("パイプラインエラー。コンソールログを確認してください。");
+        });
+    </script>
+
+</body>
+
+</html>
